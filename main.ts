@@ -249,7 +249,7 @@ class YesterdayNoteSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Auto-create Yesterday's Note")
+			.setName("Auto-create yesterday's note")
 			.setDesc(
 				"Automatically create yesterday's daily note if it doesn't exist."
 			)
