@@ -139,7 +139,12 @@ export default class YesterdayNotePlugin extends Plugin {
 			return null;
 		}
 
-		return await this.app.vault.read(templateFile as TFile);
+		if (!(templateFile instanceof TFile)) {
+			new Notice(`Template path is not a file: ${templatePath}`);
+			return null;
+		}
+
+		return await this.app.vault.read(templateFile);
 	}
 
 	async openYesterdayNote() {
@@ -161,8 +166,12 @@ export default class YesterdayNotePlugin extends Plugin {
 			}
 
 			if (file) {
+				if (!(file instanceof TFile)) {
+					new Notice(`Path does not point to a file: ${fullPath}`);
+					return;
+				}
 				const leaf = this.app.workspace.getUnpinnedLeaf();
-				await leaf.openFile(file as TFile);
+				await leaf.openFile(file);
 			} else {
 				new Notice(`No note found at: ${fullPath}`);
 			}
