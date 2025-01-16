@@ -1,134 +1,256 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {
+	App,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFile,
+	normalizePath,
+	Notice,
+	moment,
+} from "obsidian";
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface DailyNotesPlugin {
+	options: {
+		format: string;
+		folder: string;
+	};
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+interface InternalPlugins {
+	plugins: {
+		"daily-notes": {
+			instance: DailyNotesPlugin;
+			enabled: boolean;
+		};
+	};
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+interface ObsidianApp extends App {
+	internalPlugins: InternalPlugins;
+}
+
+interface YesterdayNoteSettings {
+	dateFormat: string | null;
+	folder: string;
+	template: string;
+	autoCreateYesterday: boolean;
+}
+
+const DEFAULT_SETTINGS: YesterdayNoteSettings = {
+	dateFormat: null,
+	folder: "",
+	template: "",
+	autoCreateYesterday: true,
+};
+
+export default class YesterdayNotePlugin extends Plugin {
+	settings: YesterdayNoteSettings;
 
 	async onload() {
 		await this.loadSettings();
+		this.addSettingTab(
+			new YesterdayNoteSettingTab(this.app as ObsidianApp, this)
+		);
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.addRibbonIcon(
+			"calendar-minus",
+			"Open yesterday's daily note",
+			() => {
+				this.openYesterdayNote();
+			}
+		);
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
+			id: "open-yesterday-note",
+			name: "Open yesterday's daily note",
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
+				this.openYesterdayNote();
+			},
 		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	getDailyNotesFormat(): string {
+		const dailyNotes = (this.app as ObsidianApp).internalPlugins.plugins[
+			"daily-notes"
+		];
+		if (!dailyNotes?.enabled) {
+			new Notice("Daily Notes plugin is not enabled");
+			throw new Error("Daily Notes plugin is not enabled");
+		}
+
+		return dailyNotes.instance.options.format || "YYYY-MM-DD";
+	}
+
+	getDateFormat(): string {
+		return this.settings.dateFormat || this.getDailyNotesFormat();
+	}
+
+	getDailyNotesFolder(): string {
+		if (this.settings.folder) return this.settings.folder;
+
+		const dailyNotes = (this.app as ObsidianApp).internalPlugins.plugins[
+			"daily-notes"
+		];
+		return dailyNotes?.instance.options.folder || "";
+	}
+
+	async createNote(path: string, date: moment.Moment): Promise<TFile> {
+		let content = (await this.getTemplateContents()) || "";
+
+		if (content) {
+			content = content.replace(/{{date:([^}]*)}}/g, (_, format) =>
+				date.format(format)
+			);
+		}
+
+		const dirPath = path.substring(0, path.lastIndexOf("/"));
+		if (dirPath) {
+			try {
+				await this.app.vault.createFolder(dirPath);
+			} catch (e) {
+				if (!e.message.includes("Folder already exists")) {
+					throw e;
+				}
+			}
+		}
+
+		return await this.app.vault.create(path, content);
+	}
+
+	async getTemplateContents(): Promise<string | null> {
+		const templatePath = this.settings.template;
+		if (!templatePath) return null;
+
+		const templateFile = this.app.vault.getAbstractFileByPath(templatePath);
+		if (!templateFile) {
+			new Notice(`Template file not found: ${templatePath}`);
+			return null;
+		}
+
+		return await this.app.vault.read(templateFile as TFile);
+	}
+
+	async openYesterdayNote() {
+		try {
+			const yesterday = moment().subtract(1, "day");
+			const dateFormat = this.getDateFormat();
+			const formattedDate = yesterday.format(dateFormat);
+
+			const folder = this.getDailyNotesFolder();
+			const fullPath = normalizePath(
+				folder ? `${folder}/${formattedDate}.md` : `${formattedDate}.md`
+			);
+
+			let file = this.app.vault.getAbstractFileByPath(fullPath);
+
+			if (!file && this.settings.autoCreateYesterday) {
+				new Notice("Creating yesterday's note...");
+				file = await this.createNote(fullPath, yesterday);
+			}
+
+			if (file) {
+				const leaf = this.app.workspace.getUnpinnedLeaf();
+				await leaf.openFile(file as TFile);
+			} else {
+				new Notice(`No note found at: ${fullPath}`);
+			}
+		} catch (error) {
+			new Notice(`Error: ${error.message}`);
+			console.error("Failed to open yesterday's note:", error);
+		}
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class YesterdayNoteSettingTab extends PluginSettingTab {
+	plugin: YesterdayNotePlugin;
+	app: ObsidianApp;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: ObsidianApp, plugin: YesterdayNotePlugin) {
 		super(app, plugin);
+		this.app = app;
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
-
+		const { containerEl } = this;
 		containerEl.empty();
 
+		const dailyNotesFormat = this.plugin.getDailyNotesFormat();
+
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+			.setName("Date format")
+			.setDesc(`Your current syntax looks like this: ${dailyNotesFormat}`)
+			.addText((text) =>
+				text
+					.setPlaceholder(dailyNotesFormat)
+					.setValue(this.plugin.settings.dateFormat || "")
+					.onChange(async (value) => {
+						const trimmedValue = value.trim();
+						if (trimmedValue === "") {
+							this.plugin.settings.dateFormat = null;
+							await this.plugin.saveSettings();
+							return;
+						}
+
+						if (moment().format(trimmedValue)) {
+							this.plugin.settings.dateFormat = trimmedValue;
+							await this.plugin.saveSettings();
+						}
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("File location")
+			.setDesc("If created, yesterday's note will be placed here.")
+			.addText((text) =>
+				text
+					.setPlaceholder("daily-notes/")
+					.setValue(this.plugin.settings.folder)
+					.onChange(async (value) => {
+						this.plugin.settings.folder = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Template file location")
+			.setDesc(
+				"The path to the file you want to use as the template. Case sensitive and must be set manually."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("templates/daily.md")
+					.setValue(this.plugin.settings.template)
+					.onChange(async (value) => {
+						this.plugin.settings.template = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-create Yesterday's Note")
+			.setDesc(
+				"Automatically create yesterday's daily note if it doesn't exist."
+			)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.plugin.settings.autoCreateYesterday)
+					.onChange(async (value) => {
+						this.plugin.settings.autoCreateYesterday = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 }
