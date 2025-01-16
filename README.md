@@ -1,6 +1,6 @@
 # Yesterday's note
 
-![yesterdays-note-thumbnail](https://github.com/user-attachments/assets/90f7e932-a6ff-4140-a91f-3b4ad0c90a6d)
+![yesterdays-note-thumbnail](https://github.com/user-attachments/assets/5f32374d-9efa-4e72-a306-4b267fb038a1)
 
 This plugin adds a command to [Obsidian](https://obsidian.md) to open yesterday's daily note. If the note does not exist, the plugin can create it for you.
 
@@ -21,7 +21,7 @@ The `Open previous daily note` command is only available when a daily note is fo
 
 **Why do I have to set the template file manually?**
 
-Obsidian doesn't offer a way to directly retrieve the template file used for creating daily notes. Due to this limitation, my plugin can't automatically detect the template file, so you need to set it manually.
+Obsidian doesn't offer a way to directly retrieve the template file used for creating daily notes. Due to this limitation, the plugin can't automatically detect the template file so you need to set it manually.
 
 **Yesterday's note isn't using the correct template file**
 
